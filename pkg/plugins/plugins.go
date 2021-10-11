@@ -1,6 +1,9 @@
 package plugins
 
 import (
+	"context"
+	"fmt"
+
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -8,6 +11,7 @@ import (
 	"k8s.io/client-go/tools/clientcmd"
 	"k8s.io/klog"
 	framework "k8s.io/kubernetes/pkg/scheduler/framework/v1alpha1"
+	"k8s.io/kubernetes/pkg/scheduler/nodeinfo"
 	metricsv "k8s.io/metrics/pkg/client/clientset/versioned"
 )
 
@@ -28,28 +32,35 @@ type Sample struct {
 	handle        framework.FrameworkHandle
 }
 
+var _ framework.FilterPlugin = &Sample{}
+var _ framework.ScorePlugin = &Sample{}
+
 func (s *Sample) Name() string {
 	return Name
 }
 
-func (s *Sample) PreFilter(pc *framework.PluginContext, pod *v1.Pod) *framework.Status {
-	klog.V(3).Infof("prefilter pod: %v", pod.Name)
-	return framework.NewStatus(framework.Success, "")
-}
+// func (s *Sample) PreFilter(ctx context.Context, pod *v1.Pod) *framework.Status {
+// 	klog.V(3).Infof("prefilter pod: %v", pod.Name)
+// 	return framework.NewStatus(framework.Success, "")
+// }
 
-func (s *Sample) Filter(pc *framework.PluginContext, pod *v1.Pod, nodeName string) *framework.Status {
-	klog.V(3).Infof("filter pod: %v, node: %v", pod.Name, nodeName)
+// func (s *Sample) PreFilterExtensions() framework.PreFilterExtensions {
+// 	return nil
+// }
+
+func (s *Sample) Filter(ctx context.Context, state *framework.CycleState, pod *v1.Pod, nodeInfo *nodeinfo.NodeInfo) *framework.Status {
+	klog.V(3).Infof("filter pod: %v, node: %v", pod.Name, nodeInfo.Node().Name)
 	// if nodeName == "shtl009063227" {
 	// 	return framework.NewStatus(framework.Unschedulable, "")
 	// }
 	return framework.NewStatus(framework.Success, "")
 }
 
-func (s *Sample) Score(pc *framework.PluginContext, pod *v1.Pod, nodeName string) (int, *framework.Status) {
+func (s *Sample) Score(ctx context.Context, state *framework.CycleState, pod *v1.Pod, nodeName string) (int64, *framework.Status) {
 	klog.V(3).Infof("Score pod: %v, node: %v", pod.Name, nodeName)
-	nodeInfo, ok := s.handle.NodeInfoSnapshot().NodeInfoMap[nodeName]
-	if !ok {
-		return framework.MinNodeScore, framework.NewStatus(framework.Error, "")
+	nodeInfo, err := s.handle.SnapshotSharedLister().NodeInfos().Get(nodeName)
+	if err != nil {
+		return 0, framework.NewStatus(framework.Error, fmt.Sprintf("getting node %q from Snapshot: %v", nodeName, err))
 	}
 
 	nodeMetrics, err := s.metricsClient.MetricsV1beta1().NodeMetricses().Get(nodeName, metav1.GetOptions{})
@@ -63,11 +74,17 @@ func (s *Sample) Score(pc *framework.PluginContext, pod *v1.Pod, nodeName string
 	memMetrics := float64(100*nodeMetrics.Usage.Memory().Value()) / float64(nodeInfo.AllocatableResource().Memory)
 	klog.V(3).Infof("node name: %s, cpu metrics %f, mem metrics %f", nodeInfo.Node().Name, cpuMetrics, memMetrics)
 
-	nodeScore := ((100-cpuMetrics)/10 + (100-memMetrics)/10) / 2
-	return int(nodeScore), framework.NewStatus(framework.Success, "")
+	// nodeScore := ((100-cpuMetrics)/10 + (100-memMetrics)/10) / 2
+	nodeScore := (100 - cpuMetrics)
+	klog.V(3).Infof("node name: %s, pod name: %s, score is %f", nodeInfo.Node().Name, pod.Name, nodeScore)
+	return int64(nodeScore), framework.NewStatus(framework.Success, "")
 }
 
-func (s *Sample) NormalizeScore(pc *framework.PluginContext, pod *v1.Pod, nodeScoreList framework.NodeScoreList) *framework.Status {
+func (s *Sample) ScoreExtensions() framework.ScoreExtensions {
+	return nil
+}
+
+func (s *Sample) NormalizeScore(ctx context.Context, pod *v1.Pod, nodeScoreList framework.NodeScoreList) *framework.Status {
 	klog.V(3).Infof("Normalize Score pod: %v, node Score List: %v", pod.Name, nodeScoreList)
 	return nil
 }

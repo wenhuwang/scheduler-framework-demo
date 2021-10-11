@@ -164,7 +164,7 @@ data:
       filter:
         enabled:
         - name: "sample-plugin"
-      preBind:
+      score:
         enabled:
         - name: "sample-plugin"
     pluginConfig:
@@ -173,6 +173,7 @@ data:
         favorite_color: "#326CE5"
         favorite_number: 7
         thanks_to: "thockin"
+        kubeconfig: "/etc/scheduler.conf"
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -197,17 +198,30 @@ spec:
         - name: scheduler-config
           configMap:
             name: scheduler-config
+        - hostPath:
+            path: /etc/kubernetes/kube-scheduler.kubeconfig
+            type: FileOrCreate
+          name: kubeconfig
       containers:
         - name: scheduler-ctrl
-          image: cnych/sample-scheduler:v0.1.6
+          image: wenhuwang/sample-scheduler:v1.17.16-20211009
           imagePullPolicy: IfNotPresent
-          args:
-            - sample-scheduler-framework
+          command:
+            - kube-scheduler
+            - --authentication-kubeconfig=/etc/scheduler.conf
+            - --authorization-kubeconfig=/etc/scheduler.conf
+            - --bind-address=0.0.0.0
+            - --kubeconfig=/etc/scheduler.conf
+            - --leader-elect=true
             - --config=/etc/kubernetes/scheduler-config.yaml
-            - --v=3
+            - --v=6
+          nodeSelector:
+            kubernetes.io/role: master
           resources:
             requests:
               cpu: "50m"
           volumeMounts:
             - name: scheduler-config
               mountPath: /etc/kubernetes
+            - mountPath: /etc/scheduler.conf
+              name: kubeconfig
