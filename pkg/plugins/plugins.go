@@ -38,11 +38,32 @@ func (s *Sample) Name() string {
 // 	return framework.NewStatus(framework.Success, "")
 // }
 
+// Filter filter high load node
 func (s *Sample) Filter(ctx context.Context, state *framework.CycleState, pod *v1.Pod, nodeInfo *framework.NodeInfo) *framework.Status {
 	// klog.V(10).Infof("filter pod: %v, node: %v", pod.Name, nodeInfo.Node().Name)
+
+	metricsString, ok := nodeInfo.Node().Annotations[metricsAnnotation]
+	if !ok {
+		return framework.NewStatus(framework.Error, fmt.Sprintf("node %s annotations %s is not exists.", nodeInfo.Node().Name, metricsAnnotation))
+	}
+	metrics := make(map[string]float64)
+	if err := json.Unmarshal([]byte(metricsString), &metrics); err != nil {
+		return framework.NewStatus(framework.Error, fmt.Sprintf("node %s annotations %s parse failed. %v", nodeInfo.Node().Name,
+			metricsAnnotation, err))
+	}
+
+	if metrics[cpuMetricsKey]*100 > 85 || metrics[memMetricsKey]*100 > 85 || metrics[load1MetricsKey] > 3 || metrics[load5MetricsKey] > 3 {
+		if klog.V(10).Enabled() {
+			klog.Infof("%v -> %v is filtered: %v", pod.Name, nodeInfo.Node().Name, Name)
+		}
+		return framework.NewStatus(framework.Unschedulable, fmt.Sprintf("node %s resource usage is too high.", nodeInfo.Node().Name))
+	}
+
 	return framework.NewStatus(framework.Success, "")
 }
 
+// Score use node cpu utilization to score
+// if node cpu utilization metrics is 0, the node score is 0, otherwise the node score is 100 - cpuMetrics * 100
 func (s *Sample) Score(ctx context.Context, state *framework.CycleState, pod *v1.Pod, nodeName string) (int64, *framework.Status) {
 	// klog.V(10).Infof("Score pod: %v, node: %v", pod.Name, nodeName)
 	nodeInfo, err := s.handle.SnapshotSharedLister().NodeInfos().Get(nodeName)
@@ -61,7 +82,13 @@ func (s *Sample) Score(ctx context.Context, state *framework.CycleState, pod *v1
 			metricsAnnotation, err))
 	}
 	cpuMetrics := metrics[cpuMetricsKey] * 100
-	nodeScore := int64(100 - cpuMetrics)
+
+	var nodeScore int64
+	if cpuMetrics == 0 {
+		nodeScore = 0
+	} else {
+		nodeScore = int64(100 - cpuMetrics)
+	}
 
 	if klog.V(10).Enabled() {
 		klog.Infof("%v -> %v: %v, score %d", pod.Name, nodeName, Name, nodeScore)

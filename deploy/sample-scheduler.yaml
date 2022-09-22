@@ -169,6 +169,7 @@ data:
           score:
             enabled:
             - name: "RealResourceUsage"
+              weight: 5
         pluginConfig:
         - name: "RealResourceUsage"
           args:
