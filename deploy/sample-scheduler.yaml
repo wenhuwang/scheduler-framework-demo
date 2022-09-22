@@ -167,6 +167,7 @@ data:
       score:
         enabled:
         - name: "sample-plugin"
+          weight: 5
     pluginConfig:
     - name: "sample-plugin"
       args:
